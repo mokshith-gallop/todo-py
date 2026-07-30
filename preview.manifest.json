@@ -1,0 +1,18 @@
+{
+  "services": {
+    "backend": {
+      "cwd": ".",
+      "cmd": "sh",
+      "args": ["-c", "alembic upgrade head && uvicorn app.main:app --host 127.0.0.1 --port 8080"],
+      "port": 8080,
+      "healthCheck": {
+        "path": "/api/health",
+        "timeoutSeconds": 180
+      }
+    }
+  },
+  "routes": {
+    "/api": { "service": "backend", "stripPrefix": false },
+    "/": { "service": "backend", "stripPrefix": false }
+  }
+}
