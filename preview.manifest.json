@@ -3,7 +3,7 @@
     "backend": {
       "cwd": ".",
       "cmd": "sh",
-      "args": ["-c", "alembic upgrade head && uvicorn app.main:app --host 127.0.0.1 --port 8080"],
+      "args": ["-c", "python3 -m venv .venv && .venv/bin/pip install -e . && .venv/bin/alembic upgrade head && .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8080"],
       "port": 8080,
       "healthCheck": {
         "path": "/api/health",
