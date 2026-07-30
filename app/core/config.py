@@ -2,21 +2,20 @@ import os
 
 from pydantic_settings import BaseSettings
 
+from app.core.db_url import normalise_url
 
-def _build_database_url() -> str:
-    """Build database URL from DATABASE_URL env var or APP_DB_* parts."""
-    url = os.environ.get("DATABASE_URL", "")
-    if url:
-        # Ensure asyncpg driver
-        if url.startswith("postgresql://"):
-            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        return url
+
+def _resolve_database_url() -> str:
+    """Resolve DATABASE_URL from the environment, normalised for asyncpg."""
+    raw = os.environ.get("DATABASE_URL", "")
+    if raw:
+        return normalise_url(raw)
     # Fallback for local dev
     return "postgresql+asyncpg://app:app@localhost:5432/app"
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = _build_database_url()
+    DATABASE_URL: str = _resolve_database_url()
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
 
@@ -25,8 +24,5 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Ensure asyncpg driver on the final resolved value
-if settings.DATABASE_URL.startswith("postgresql://"):
-    settings.DATABASE_URL = settings.DATABASE_URL.replace(
-        "postgresql://", "postgresql+asyncpg://", 1
-    )
+# Re-normalise in case pydantic-settings resolved DATABASE_URL from .env
+settings.DATABASE_URL = normalise_url(settings.DATABASE_URL)

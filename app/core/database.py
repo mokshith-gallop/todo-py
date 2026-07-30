@@ -1,4 +1,4 @@
-import ssl
+import os
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
@@ -8,23 +8,15 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import settings
+from app.core.db_url import connect_args_for_url
 
-
-def _build_connect_args() -> dict:
-    """Build connect_args with SSL for remote PostgreSQL."""
-    url = settings.DATABASE_URL
-    if "asyncpg" in url and "localhost" not in url and "127.0.0.1" not in url:
-        ssl_ctx = ssl.create_default_context()
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.CERT_NONE
-        return {"ssl": ssl_ctx}
-    return {}
-
+# Derive SSL connect_args from the *original* env URL (before sslmode was stripped)
+_raw_url = os.environ.get("DATABASE_URL", settings.DATABASE_URL)
 
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
-    connect_args=_build_connect_args(),
+    connect_args=connect_args_for_url(_raw_url),
 )
 
 async_session_factory = async_sessionmaker(
