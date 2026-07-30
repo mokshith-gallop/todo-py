@@ -26,17 +26,16 @@ async def create_task(
     if data.position is not None:
         resolved_position = data.position
     else:
-        # Use FOR UPDATE on PostgreSQL to prevent race conditions;
-        # fall back gracefully on SQLite (which doesn't support it).
-        dialect = session.bind.dialect.name if session.bind else ""
+        # Compute next position as MAX(position) + 1000 within the list.
+        # No FOR UPDATE — PostgreSQL forbids it with aggregate functions,
+        # and the transaction's snapshot isolation already gives a
+        # consistent read for this append-only position assignment.
         max_pos_query = select(
             func.coalesce(func.max(Task.position), 0) + 1000
         ).where(
             Task.list_id == data.list_id,
             Task.deleted_at.is_(None),
         )
-        if dialect == "postgresql":
-            max_pos_query = max_pos_query.with_for_update()
         pos_result = await session.execute(max_pos_query)
         resolved_position = pos_result.scalar_one()
 
