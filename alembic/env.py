@@ -1,5 +1,6 @@
 import asyncio
 import os
+import ssl
 from logging.config import fileConfig
 
 from alembic import context
@@ -7,9 +8,7 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Import all models so metadata is populated
-from app.models import Base  # noqa: F401
-from app.models.user import User  # noqa: F401
-from app.models.task_list import TaskList  # noqa: F401
+from app.models import Base, User, TaskList, Task  # noqa: F401
 
 config = context.config
 
@@ -25,6 +24,18 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+
+
+def _connect_args() -> dict:
+    """Build connect_args with SSL if needed."""
+    db_url = config.get_main_option("sqlalchemy.url", "")
+    # Enable SSL for non-localhost PostgreSQL connections
+    if "asyncpg" in db_url and "localhost" not in db_url and "127.0.0.1" not in db_url:
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        return {"ssl": ssl_ctx}
+    return {}
 
 
 def run_migrations_offline() -> None:
@@ -50,6 +61,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=_connect_args(),
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
