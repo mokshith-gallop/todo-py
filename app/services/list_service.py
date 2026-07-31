@@ -1,11 +1,12 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ResourceNotFoundError
 from app.models.task_list import TaskList
-from app.schemas.list import ListCreate
+from app.schemas.list import ListCreate, ListUpdate
 
 
 async def create_list(
@@ -47,3 +48,75 @@ async def create_list(
     # 3. Flush to persist to DB (commit handled by get_session context manager)
     await session.flush()
     return task_list
+
+
+async def update_list(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    list_id: uuid.UUID,
+    data: ListUpdate,
+) -> TaskList:
+    # 1. Fetch & authorize — 404 for missing, soft-deleted, or other-user lists
+    #    (never 403, to avoid leaking existence).
+    stmt = select(TaskList).where(
+        TaskList.id == list_id,
+        TaskList.user_id == user_id,
+        TaskList.deleted_at.is_(None),
+    )
+    result = await session.execute(stmt)
+    task_list = result.scalar_one_or_none()
+    if task_list is None:
+        raise ResourceNotFoundError("List not found")
+
+    # 2. Apply provided fields
+    if data.name is not None:
+        task_list.name = data.name
+    if data.position is not None:
+        task_list.position = data.position
+    task_list.updated_at = datetime.now(timezone.utc)
+
+    # 3. Flush to persist changes
+    await session.flush()
+
+    # 4. Rebalance check — only when position was updated
+    if data.position is not None:
+        await _rebalance_positions_if_needed(session, user_id, task_list)
+
+    return task_list
+
+
+async def _rebalance_positions_if_needed(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    task_list: TaskList,
+) -> None:
+    """Check for adjacent position gaps below 1e-6 and rebalance if needed.
+
+    Reassigns all positions as 1000, 2000, 3000, … preserving the current
+    sort order.  Runs in the same transaction (same session).
+    """
+    # Fetch all non-deleted list positions for this user, ordered
+    stmt = (
+        select(TaskList.id, TaskList.position)
+        .where(TaskList.user_id == user_id, TaskList.deleted_at.is_(None))
+        .order_by(TaskList.position)
+    )
+    rows = (await session.execute(stmt)).all()
+
+    # Check if any adjacent gap < 1e-6
+    needs_rebalance = False
+    for i in range(1, len(rows)):
+        if rows[i].position - rows[i - 1].position < 1e-6:
+            needs_rebalance = True
+            break
+
+    if needs_rebalance:
+        for idx, row in enumerate(rows):
+            await session.execute(
+                update(TaskList)
+                .where(TaskList.id == row.id)
+                .values(position=(idx + 1) * 1000)
+            )
+        await session.flush()
+        # Refresh the target list to reflect its potentially new position
+        await session.refresh(task_list)
